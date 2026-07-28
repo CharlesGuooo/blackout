@@ -97,11 +97,15 @@ begin
     TasksFile := ExpandConstant('{app}\todo.txt');
     if FileExists(TasksFile) then
     begin
-      { Default to No. Silently deleting someone's task list would be rude. }
-      if MsgBox('Delete your task list as well?' + #13#10 + #13#10 +
+      { SuppressibleMsgBox, not MsgBox: plain MsgBox ignores /SUPPRESSMSGBOXES
+        and blocks forever on an unattended uninstall. The last argument is the
+        answer used in silent mode -- IDNO, because silently deleting someone's
+        task list would be rude. MB_DEFBUTTON2 makes No the default
+        interactively too. }
+      if SuppressibleMsgBox('Delete your task list as well?' + #13#10 + #13#10 +
                 TasksFile + #13#10 + #13#10 +
                 'Choose No to keep it.',
-                mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES then
+                mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES then
       begin
         DeleteFile(TasksFile);
         DeleteFile(ExpandConstant('{app}\todo.txt.tmp'));
