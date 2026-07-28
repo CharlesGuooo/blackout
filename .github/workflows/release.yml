@@ -1,0 +1,131 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from src/version.h
+        id: ver
+        shell: pwsh
+        run: |
+          $h = Get-Content src/version.h -Raw
+          if ($h -notmatch '#define\s+BLACKOUT_VERSION_STR\s+"([^"]+)"') {
+            throw "BLACKOUT_VERSION_STR not found in src/version.h"
+          }
+          $v = $Matches[1]
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "version.h says $v"
+
+      # A tag that disagrees with the embedded version ships a binary whose
+      # About box lies about which release it is. Fail loudly instead.
+      - name: Tag must match version.h
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v', ''
+          $ver = "${{ steps.ver.outputs.version }}"
+          if ($tag -ne $ver) {
+            throw "tag v$tag does not match src/version.h ($ver) - bump one of them"
+          }
+          Write-Host "tag and version.h agree on $ver"
+
+      - name: Build
+        shell: cmd
+        run: build.bat
+
+      - name: Unit self-test
+        shell: pwsh
+        run: |
+          $p = Start-Process bin\Blackout.exe -ArgumentList '--selftest' -Wait -PassThru
+          if (Test-Path bin\selftest.log) { Get-Content bin\selftest.log }
+          if ($p.ExitCode -ne 0) { throw "selftest failed with exit code $($p.ExitCode)" }
+          Remove-Item bin\selftest.log -ErrorAction SilentlyContinue
+
+      # The end-to-end suite injects real keystrokes and reads screen pixels.
+      # That is not reliable on an unattended runner, and a flaky red X trains
+      # people to ignore CI. It runs on a real desktop instead.
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "$env:ProgramFiles\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe not found after choco install" }
+          & $iscc installer\blackout.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed with exit code $LASTEXITCODE" }
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $stage = "dist\portable"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item bin\Blackout.exe $stage
+          Copy-Item LICENSE   "$stage\LICENSE.txt"
+          Copy-Item README.md $stage
+          Compress-Archive -Path "$stage\*" -DestinationPath "dist\Blackout-$v-portable.zip" -Force
+          Remove-Item $stage -Recurse -Force
+
+      - name: Checksums
+        shell: pwsh
+        run: |
+          Push-Location dist
+          Get-ChildItem -File | Where-Object { $_.Extension -in '.exe', '.zip' } |
+            ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.Name -Algorithm SHA256).Hash.ToLower(), $_.Name } |
+            Set-Content SHA256SUMS.txt -Encoding ascii
+          Get-Content SHA256SUMS.txt
+          Pop-Location
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackout-${{ steps.ver.outputs.version }}
+          path: dist/*
+
+      # gh is preinstalled on the runner, so no third-party action is needed
+      # here. One less thing to trust in a public repo's supply chain.
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $notes = @"
+## Install
+
+- **``Blackout-$v-Setup.exe``** - installs for your user only. No admin rights, no UAC prompt.
+- **``Blackout-$v-portable.zip``** - unzip and run it from anywhere.
+
+The first time you open it, the list already contains four lines telling you how to use it. Delete them as you learn them.
+
+### Windows will warn you
+
+SmartScreen will say *"Windows protected your PC"* and refuse to run the installer. Click **More info -> Run anyway**.
+
+The binaries are not code-signed. A certificate costs \$200-400 a year and a fresh one gets flagged anyway until it builds reputation - that math does not work for a free 132 KB utility.
+
+Verify instead of trusting - every file is listed in ``SHA256SUMS.txt``:
+
+``````powershell
+Get-FileHash .\Blackout-$v-Setup.exe -Algorithm SHA256
+``````
+
+Built from this tag by GitHub Actions; the workflow run is linked on this page.
+"@
+          $notes | Set-Content release-notes.md -Encoding utf8
+          gh release create "${{ github.ref_name }}" (Get-ChildItem dist -File | ForEach-Object { $_.FullName }) `
+            --title "Blackout $v" --notes-file release-notes.md
+          if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }

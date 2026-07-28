@@ -1,0 +1,13 @@
+# Build output
+bin/
+obj/
+dist/
+
+# Test artifacts
+tools/shots/
+*.log
+
+# Local data files (yours, not the project's)
+todo.txt
+todo.ini
+todo.txt.tmp

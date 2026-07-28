@@ -1,0 +1,4 @@
+Ctrl+Shift+` shows and hides this
+One line = one task. Just type
+Esc saves and hides
+Delete a line when done — try this one
