@@ -9,8 +9,10 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  windows:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
 
     steps:
       - uses: actions/checkout@v4
@@ -78,36 +80,68 @@ jobs:
           Compress-Archive -Path "$stage\*" -DestinationPath "dist\Blackout-$v-portable.zip" -Force
           Remove-Item $stage -Recurse -Force
 
-      - name: Checksums
-        shell: pwsh
-        run: |
-          Push-Location dist
-          Get-ChildItem -File | Where-Object { $_.Extension -in '.exe', '.zip' } |
-            ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.Name -Algorithm SHA256).Hash.ToLower(), $_.Name } |
-            Set-Content SHA256SUMS.txt -Encoding ascii
-          Get-Content SHA256SUMS.txt
-          Pop-Location
-
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: blackout-${{ steps.ver.outputs.version }}
           path: dist/*
 
+  macos:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: ./build.sh
+
+      # Includes the off-screen pixel-band render check, which needs no
+      # Screen Recording permission. The keystroke-driven tools/e2e_test.sh
+      # runs on a real desktop, for the same reason as on Windows.
+      - name: Unit self-test
+        run: bin/Blackout.app/Contents/MacOS/Blackout --selftest
+
+      - name: Package zip
+        id: zip
+        run: |
+          v=$(sed -n 's/^#define BLACKOUT_VERSION_STR "\(.*\)".*/\1/p' src/version.h | tr -d '\r')
+          mkdir -p dist
+          # ditto keeps the bundle's symlinks, permissions and signature intact
+          ditto -c -k --keepParent bin/Blackout.app "dist/Blackout-$v-mac.zip"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: blackout-mac-${{ steps.zip.outputs.version }}
+          path: dist/*
+
+  release:
+    needs: [windows, macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum *.exe *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       # gh is preinstalled on the runner, so no third-party action is needed
       # here. One less thing to trust in a public repo's supply chain.
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $v = "${{ steps.ver.outputs.version }}"
-          # Notes live in a template file rather than inline: a PowerShell
-          # here-string needs its terminator at column 0, which cannot coexist
-          # with a YAML block scalar's indentation.
-          (Get-Content installer/release-notes-template.md -Raw).Replace('{{VERSION}}', $v) |
-            Set-Content release-notes.md -Encoding utf8
-          $files = Get-ChildItem dist -File | ForEach-Object { $_.FullName }
-          gh release create "${{ github.ref_name }}" @files --title "Blackout $v" --notes-file release-notes.md
-          if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
+          v="${{ needs.windows.outputs.version }}"
+          sed "s/{{VERSION}}/$v/g" installer/release-notes-template.md > release-notes.md
+          gh release create "${{ github.ref_name }}" dist/* --title "Blackout $v" --notes-file release-notes.md

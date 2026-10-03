@@ -15,6 +15,8 @@ it.
 **132 KB. One executable. No installer required, no runtime, no dependencies.
 124 KB of memory sitting in the tray.**
 
+There is a macOS version too: same hotkey, same behaviour. See [macOS](#macos).
+
 ---
 
 ## Install
@@ -189,6 +191,140 @@ write access to a directory via ACL.
   still run, just without DPI awareness.
 - One plain text file. No multiple lists, no tags, no due dates, no sync. Also
   by design: when something goes wrong, Notepad can fix it.
+
+---
+
+## macOS
+
+The same program, rewritten against AppKit: one Objective-C file
+(`mac/main.m`), the same hotkey, the same behaviour, the same `todo.ini` keys.
+
+### Install
+
+Download `Blackout-x.y.z-mac.zip` from the
+[latest release](https://github.com/CharlesGuooo/blackout/releases/latest),
+unzip it, drag `Blackout.app` into Applications and open it. The first launch
+shows the tutorial list straight away; after that it lives in the menu bar.
+
+Needs macOS 13 Ventura or newer. One universal binary covers Apple Silicon and
+Intel.
+
+#### macOS will block it. Here's why, and what to do
+
+The app isn't notarized. Notarization needs an Apple Developer membership at
+$99 a year, which is the same math as the Windows certificate. The first time
+you open it, macOS refuses. Click **Done**, then go to **System Settings →
+Privacy & Security**, scroll down and click **Open Anyway**. Or, in Terminal:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Blackout.app
+```
+
+To verify instead of trusting, compare against `SHA256SUMS.txt`:
+
+```sh
+shasum -a 256 Blackout-1.0.0-mac.zip
+```
+
+### What's different on a Mac
+
+| | Windows | macOS |
+| --- | --- | --- |
+| Lives in | the tray | the menu bar. Left click shows / hides; right click (or Ctrl-click) opens the menu |
+| `todo.txt`, `todo.ini` | next to the executable | `~/Library/Application Support/Blackout/`. Writing inside a signed `.app` would break it. **Open todo.txt** in the menu opens it in TextEdit |
+| File format | UTF-8 with BOM, CRLF | UTF-8, LF. Either version reads the other's files, so you can copy a list across |
+| Start at login | registry Run key | Login Items (System Settings → General → Login Items) |
+| Select all / copy / paste / undo | Ctrl | ⌘ |
+
+Everything else is the same: `Ctrl + Shift + \`` toggles, `Esc` saves and
+hides, switching to another app saves and hides, nothing wraps, and the text
+sizes itself to fill the screen your mouse is on, menu bar and Dock included.
+Input methods work. `Esc` while you're composing Pinyin cancels the composition
+first, then a second `Esc` hides the list.
+
+### Configure
+
+`todo.ini`, in the folder above. Restart Blackout after editing.
+
+```ini
+[hotkey]
+mods=ctrl+shift            ; ctrl / alt (= option) / shift / win (= cmd), any combination
+key=`                      ; a single character, or a Mac key code like 0x32
+
+[display]
+font=PingFang SC           ; any installed font family; unknown ones fall back to the system font
+bold=1
+minsize=24                 ; smallest font size in points
+maxsize=400                ; largest font size in points
+```
+
+- Key codes are Mac virtual key codes (`kVK_*`), not Windows ones. `0x32` is
+  the backtick key.
+- macOS 15 and later refuse a hotkey whose only modifiers are Option or
+  Option + Shift. Include Ctrl or Cmd.
+- If another app has already registered the hotkey, Blackout tells you at
+  startup. A shortcut macOS itself owns (⌘Space, say) can't be detected;
+  macOS just wins.
+- `Ctrl + Shift + \`` is VS Code's "New Terminal" on the Mac too.
+
+### How small
+
+Measured on a MacBook with a 2560×1600 display, macOS 14.6:
+
+| | |
+| --- | --- |
+| App bundle | 252 KB: universal binary plus icon |
+| Sitting in the menu bar, never opened | **~10 MB** footprint |
+| After you've opened it | **~17 MB**, flat across repeated show / hide |
+| Idle CPU | 0%: no timers while hidden, no keyboard hooks |
+
+"Footprint" is the number Activity Monitor shows as Memory. The Windows
+numbers aren't reachable here: an empty AppKit program that does nothing but
+put an icon in the menu bar already sits at 8.9 MB, so Blackout's own share of
+the 10 MB is about one. There's no `SetProcessWorkingSetSize` to hand pages
+back after hiding either.
+
+The hotkey uses Carbon's `RegisterEventHotKey`, which needs no Accessibility
+permission and costs nothing while idle. The overlay is one borderless window
+with an `NSTextView` in it, for the same reason the Windows version uses an
+`EDIT` control: caret, selection, input methods and undo come for free.
+
+### Build
+
+Needs the Xcode Command Line Tools (`xcode-select --install`). Nothing else.
+
+```sh
+./build.sh
+```
+
+Output: `bin/Blackout.app`, universal and ad-hoc signed.
+
+### Tests
+
+```
+bin/Blackout.app/Contents/MacOS/Blackout --selftest    74 unit checks
+tools/e2e_test.sh                                      30 end-to-end checks
+                                                       (+12 pixel checks with Screen Recording)
+```
+
+`--selftest` includes the text-band pixel check from the Windows end-to-end
+suite, run in-process: it renders the overlay off-screen at 1440×900 for each
+of the same task lists and counts bands. It needs no permissions, so it runs on
+CI too.
+
+`tools/e2e_test.sh` drives the real program on the real desktop. The terminal
+running it needs **Accessibility** (for synthesised keystrokes) and, for the
+pixel checks on the live screen, **Screen Recording**. It works in a temporary
+`--data-dir`, so your real list is never touched. It does stop every running
+Blackout, because a global hotkey belongs to exactly one process. Text is
+entered through the clipboard because an input method would swallow
+synthesised letter keys; your clipboard text is put back afterwards.
+
+### Limitations on macOS
+
+- It can't cover a game that captures the display exclusively. Same as on
+  Windows.
+- Not notarized; see above.
 
 ---
 

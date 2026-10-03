@@ -3,11 +3,13 @@
 图标就是这个软件本身的样子：黑色圆角方块 + 三条白横线（一份清单）。
 16/32/48 用 BMP DIB，256 用 PNG（压缩后才 1-2KB，不然光这一张就 260KB）。
 
-用法： python tools/make_icon.py
+用法： python tools/make_icon.py           -> assets/blackout.ico
+      python tools/make_icon.py --icns    -> assets/blackout.icns（macOS）
 """
 
 import os
 import struct
+import sys
 import zlib
 
 SIZES_BMP = (16, 32, 48)
@@ -122,5 +124,45 @@ def main():
     print("wrote %s (%d bytes, %d images)" % (path, len(out), len(images)))
 
 
+# macOS 图标：(类型码, 像素尺寸)。每项都是一张 PNG，icns 容器本身极简单，
+# 直接拼字节，不依赖 iconutil，Windows 上也能生成。
+ICNS_TYPES = (
+    (b"icp4", 16), (b"icp5", 32), (b"ic11", 32), (b"ic12", 64),
+    (b"ic07", 128), (b"ic13", 256), (b"ic08", 256), (b"ic14", 512),
+    (b"ic09", 512), (b"ic10", 1024),
+)
+
+
+def render_mac(size):
+    """macOS 规范：圆角方块只占画布中间 824/1024，四周留透明边。"""
+    inner = round(size * 824 / 1024)
+    pad = (size - inner) // 2
+    small = render(inner)
+    px = [[CLEAR] * size for _ in range(size)]
+    for y in range(inner):
+        px[pad + y][pad:pad + inner] = small[y]
+    return px
+
+
+def main_icns():
+    cache = {}
+    body = bytearray()
+    for tag, s in ICNS_TYPES:
+        if s not in cache:
+            cache[s] = png(render_mac(s), s)
+        body += tag + struct.pack(">I", 8 + len(cache[s])) + cache[s]
+    out = b"icns" + struct.pack(">I", 8 + len(body)) + bytes(body)
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, "assets", "blackout.icns")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as f:
+        f.write(out)
+    print("wrote %s (%d bytes, %d images)" % (path, len(out), len(ICNS_TYPES)))
+
+
 if __name__ == "__main__":
-    main()
+    if "--icns" in sys.argv[1:]:
+        main_icns()
+    else:
+        main()

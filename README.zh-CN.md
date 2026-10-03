@@ -11,6 +11,8 @@
 
 **132 KB，单个可执行文件。不装也能用，没有运行时，没有任何依赖。缩在托盘里只占 124 KB 内存。**
 
+也有 macOS 版：同样的热键、同样的行为，见 [macOS](#macos)。
+
 ---
 
 ## 安装
@@ -163,6 +165,124 @@ Blackout 实例——全局热键只能属于一个进程。
 - 逐显示器 DPI 需要 Windows 10 1703 或更新。更老的系统照样能跑，只是不做 DPI 感知。
 - 一个纯文本文件。没有多清单、标签、截止日期、同步。这也是刻意的——
   出了任何问题，记事本都能修。
+
+---
+
+## macOS
+
+同一个程序，用 AppKit 重写：一个 Objective-C 文件（`mac/main.m`），
+同样的热键、同样的行为、同样的 `todo.ini` 配置项。
+
+### 安装
+
+从 [最新 Release](https://github.com/CharlesGuooo/blackout/releases/latest) 下载
+`Blackout-x.y.z-mac.zip`，解压，把 `Blackout.app` 拖进"应用程序"，打开。
+第一次打开会直接弹出教程清单，之后它就待在菜单栏里。
+
+需要 macOS 13 Ventura 或更新。一个通用二进制同时支持 Apple 芯片和 Intel。
+
+#### macOS 一定会拦你，原因和处理
+
+这个 app 没有做公证（notarization）。公证需要 Apple 开发者会员，一年 99 美元，
+和 Windows 签名证书是同一笔算不过来的账。第一次打开时 macOS 会拒绝：点 **完成**，
+然后到 **系统设置 → 隐私与安全性**，往下拉，点 **仍要打开**。或者在终端里：
+
+```sh
+xattr -dr com.apple.quarantine /Applications/Blackout.app
+```
+
+不想盲信，就对一下 `SHA256SUMS.txt`：
+
+```sh
+shasum -a 256 Blackout-1.0.0-mac.zip
+```
+
+### Mac 上有什么不同
+
+| | Windows | macOS |
+| --- | --- | --- |
+| 待在哪 | 托盘 | 菜单栏。左键弹出 / 收起，右键（或 Ctrl+点按）打开菜单 |
+| `todo.txt`、`todo.ini` | exe 旁边 | `~/Library/Application Support/Blackout/`。往签过名的 `.app` 里写文件会把它弄坏。菜单里的 **打开 todo.txt** 会用"文本编辑"打开它 |
+| 文件格式 | 带 BOM 的 UTF-8，CRLF | UTF-8，LF。两边都读得懂对方的文件，清单可以直接拷过去 |
+| 开机自动启动 | 注册表 Run 键 | 登录项（系统设置 → 通用 → 登录项） |
+| 全选 / 复制 / 粘贴 / 撤销 | Ctrl | ⌘ |
+
+其余都一样：`Ctrl + Shift + \`` 弹出 / 收起，`Esc` 保存并收起，切到别的程序自动保存并收起，
+不自动换行，字号自动撑满鼠标所在的那块屏幕（菜单栏和 Dock 一起盖住）。
+输入法照常用；正在打拼音时按 `Esc` 先取消组字，再按一次才收起清单。
+
+### 配置
+
+`todo.ini`，在上面那个文件夹里，改完重启生效。
+
+```ini
+[hotkey]
+mods=ctrl+shift            ; ctrl / alt（= option）/ shift / win（= cmd）任意组合
+key=`                      ; 单个字符，或 0x32 这样的 Mac 键码
+
+[display]
+font=PingFang SC           ; 任何已安装的字体族；找不到就用系统字体
+bold=1
+minsize=24                 ; 字号下限（点）
+maxsize=400                ; 字号上限（点）
+```
+
+- 键码是 Mac 的虚拟键码（`kVK_*`），不是 Windows 的。`0x32` 就是反引号那个键。
+- macOS 15 起，只用 Option 或 Option + Shift 作修饰键的热键会被系统拒绝，请带上 Ctrl 或 Cmd。
+- 热键被别的程序注册过的话，启动时会弹窗告诉你。但被 macOS 自己占用的快捷键
+  （比如 ⌘空格）检测不到，系统会直接赢。
+- `Ctrl + Shift + \`` 在 Mac 上也是 VS Code 的"新建终端"。
+
+### 有多小
+
+在 2560×1600 屏幕的 MacBook、macOS 14.6 上实测：
+
+| | |
+| --- | --- |
+| App 包 | 252 KB，通用二进制加图标 |
+| 待在菜单栏、从未弹出过 | footprint **约 10 MB** |
+| 弹出过之后 | **约 17 MB**，反复弹出收起也不涨 |
+| 空闲 CPU | 0%：隐藏时没有定时器，没有键盘钩子 |
+
+footprint 就是活动监视器里"内存"那一列。Windows 版的数字在 Mac 上做不到：
+一个只在菜单栏放个图标、别的什么都不干的空 AppKit 程序就已经占 8.9 MB，
+所以那 10 MB 里 Blackout 自己只占 1 MB 左右；隐藏后也没有 `SetProcessWorkingSetSize`
+这种把内存还给系统的接口。
+
+热键用的是 Carbon 的 `RegisterEventHotKey`，不需要"辅助功能"权限，空闲时零开销。
+覆盖层是一个无边框窗口套一个 `NSTextView`，和 Windows 版用 `EDIT` 控件是同一个道理：
+光标、选中、输入法、撤销全都白送。
+
+### 自己编译
+
+只需要 Xcode 命令行工具（`xcode-select --install`），别的都不用。
+
+```sh
+./build.sh
+```
+
+产物是 `bin/Blackout.app`，通用二进制，已做 ad-hoc 签名。
+
+### 测试
+
+```
+bin/Blackout.app/Contents/MacOS/Blackout --selftest    74 项单元断言
+tools/e2e_test.sh                                      30 项端到端断言
+                                                       （有屏幕录制权限时另加 12 项像素断言）
+```
+
+`--selftest` 里包含 Windows 端到端测试那套"文字带"像素断言，在进程内完成：
+用同样几份清单，把覆盖层按 1440×900 离屏画出来数带数。不需要任何权限，CI 上也能跑。
+
+`tools/e2e_test.sh` 在真实桌面上驱动真程序。运行它的终端需要 **辅助功能** 权限（合成按键），
+要在真实屏幕上做像素断言还需要 **屏幕录制**。它用临时的 `--data-dir`，绝不碰你真实的清单；
+但会停掉所有正在运行的 Blackout——全局热键只能属于一个进程。文字一律通过剪贴板粘贴
+（输入法会截走合成的字母键），剪贴板里原来的文字测完会还原。
+
+### macOS 上的已知限制
+
+- 独占显示器的游戏盖不住，和 Windows 一样。
+- 没有公证，见上文。
 
 ---
 
