@@ -223,7 +223,7 @@ xattr -dr com.apple.quarantine /Applications/Blackout.app
 To verify instead of trusting, compare against `SHA256SUMS.txt`:
 
 ```sh
-shasum -a 256 Blackout-1.0.0-mac.zip
+shasum -a 256 Blackout-1.1.0-mac.zip
 ```
 
 ### What's different on a Mac

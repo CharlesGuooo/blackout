@@ -194,7 +194,7 @@ xattr -dr com.apple.quarantine /Applications/Blackout.app
 不想盲信，就对一下 `SHA256SUMS.txt`：
 
 ```sh
-shasum -a 256 Blackout-1.0.0-mac.zip
+shasum -a 256 Blackout-1.1.0-mac.zip
 ```
 
 ### Mac 上有什么不同
